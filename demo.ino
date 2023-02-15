@@ -1,78 +1,44 @@
-/*----------------------------------------------------------------------
- Read Status Demo
-
- Created 12 Dec 2016
- Modified 10 Mar 2019 for Settimino 2.0.0
- by Davide Nardella
-
-------------------------------------------------------------------------
-This demo shows how to read the PLC status.
-The model extended is needed.
-
-- During the loop, try to disconnect the ethernet cable.
-  The system will report the error and will reconnect automatically
-  when you re-plug the cable.
-- For safety, this demo *doesn't write* data into the PLC, try
-  yourself to change ReadArea with WriteArea.
-- This demo uses ConnectTo() with Rack=0 and Slot=2 (S7300)
-  - If you want to connect to S71200/S71500 change them to Rack=0, Slot=0.
-  - If you want to connect to S7400 see your hardware configuration.
-  - If you want to work with a LOGO 0BA7 or S7200 please refer to the
-    documentation and change
-    Client.ConnectTo(<IP>, <Rack>, <Slot>);
-    with the couple
-    Client.SetConnectionParams(<IP>, <LocalTSAP>, <Remote TSAP>);
-    Client.Connect();
-
-
-----------------------------------------------------------------------*/
+/*Header files and macro definitions*/
+//----------------------------------------------------------
 #include "Platform.h"
 #include "Settimino.h"
 
-// Enter a MAC address and IP address for your controller below.
-// The IP address will be dependent on your local network:
+#define DO_IT_SMALL
+//----------------------------------------------------------
+
+
+/*Network Configuration*/
+//----------------------------------------------------------
 byte mac[] = {
   0x90, 0xA2, 0xDA, 0x0F, 0x08, 0xE11 };
 
 IPAddress Local(192, 168, 0, 13); // Local Address
 IPAddress PLC(192, 168, 0, 12);   // PLC Address
 
-// Following constants are needed if you are connecting via WIFI
-// The ssid is the name of my WIFI network (the password obviously is wrong)
-//char ssid[] = "SKYNET-AIR";    // Your network SSID (name)
-//char pass[] = "yourpassword";  // Your network password (if any)
 IPAddress Gateway(192, 168, 0, 1);
 IPAddress Subnet(255, 255, 255, 0);
+//----------------------------------------------------------
 
+
+/*Declare classes and global variables*/
+//----------------------------------------------------------
 S7Client Client;
 
-unsigned long Elapsed; // To calc the execution time
-int LastStatus = -1;   // To force the first print
+unsigned long Elapsed;  // To calc the execution time
+unsigned char DBnum = 1;// DB in PLC
+byte Buffer[1024];      // PDU's data
+byte WritetoPLC[64] = { 0 };      // Data Array to be written to PLC
+byte ReadfromPLC[64] = { 0 };     // Data Array to be read from PLC
 
-//----------------------------------------------------------------------
-// Setup : Init Ethernet and Serial port
-//----------------------------------------------------------------------
+//----------------------------------------------------------
+
+
+/*Setup: Init Ethernetand Serial port*/ 
+//----------------------------------------------------------
 void setup() {
     // Open serial communications and wait for port to open:
     Serial.begin(115200);
-#ifdef S7WIFI
-    //--------------------------------------------- ESP8266 Initialization    
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-    WiFi.begin(ssid, pass);
-    WiFi.config(Local, Gateway, Subnet);
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.print("Local IP address : ");
-    Serial.println(WiFi.localIP());
-#else
-    //--------------------------------Wired Ethernet Shield Initialization    
+    //Wired Ethernet Shield Initialization    
         // Start the Ethernet Library
     EthernetInit(mac, Local);
     // Setup Time, someone said me to leave 2000 because some 
@@ -81,12 +47,13 @@ void setup() {
     Serial.println("");
     Serial.println("Cable connected");
     Serial.print("Local IP address : ");
-    Serial.println(Ethernet.localIP());
-#endif   
+    Serial.println(Ethernet.localIP());   
 }
-//----------------------------------------------------------------------
-// Connects to the PLC
-//----------------------------------------------------------------------
+//----------------------------------------------------------
+
+
+/*Connects to the PLC */ 
+//----------------------------------------------------------
 bool Connect()
 {
     int Result = Client.ConnectTo(PLC,
@@ -101,9 +68,41 @@ bool Connect()
         Serial.println("Connection error");
     return Result == 0;
 }
-//----------------------------------------------------------------------
-// Prints the Error number
-//----------------------------------------------------------------------
+//-----------------------------------------------------------
+
+/*Dumps a buffer (a very rough routine)*/ 
+//-----------------------------------------------------------
+void Dump(void* Buffer, int Length)
+{
+    int i, cnt = 0;
+    pbyte buf;
+
+    if (Buffer != NULL)
+        buf = pbyte(Buffer);
+    else
+        buf = pbyte(&PDU.DATA[0]);
+
+    Serial.print("[ Dumping "); Serial.print(Length);
+    Serial.println(" bytes ]===========================");
+    for (i = 0; i < Length; i++)
+    {
+        cnt++;
+        if (buf[i] < 0x10)
+            Serial.print("0");
+        Serial.print(buf[i], HEX);
+        Serial.print(" ");
+        if (cnt == 16)
+        {
+            cnt = 0;
+            Serial.println();
+        }
+    }
+    Serial.println("===============================================");
+}
+//-----------------------------------------------------------
+
+/*Prints the Error number*/
+//-----------------------------------------------------------
 void CheckError(int ErrNo)
 {
     Serial.print("Error No. 0x");
@@ -116,27 +115,45 @@ void CheckError(int ErrNo)
         Client.Disconnect();
     }
 }
-//----------------------------------------------------------------------
-// Profiling routines
-//----------------------------------------------------------------------
+//------------------------------------------------------------
+
+
+/*Profiling routines*/ 
+//------------------------------------------------------------
 void MarkTime()
 {
     Elapsed = millis();
 }
-//----------------------------------------------------------------------
+//------------------------------------------------------------
+
+/*Calcs the time*/
 void ShowTime()
 {
-    // Calcs the time
     Elapsed = millis() - Elapsed;
     Serial.print("Job time (ms) : ");
     Serial.println(Elapsed);
 }
-//----------------------------------------------------------------------
-// Main Loop
-//----------------------------------------------------------------------
+//------------------------------------------------------------
+
+
+/*Main Loop*/ 
+//------------------------------------------------------------
 void loop()
 {
-    int Result, Status;
+    int Size, Result;
+    void* Target;
+
+    /*¸³Öµ¸øritetoPLC[0]*/
+
+    WritetoPLC[0] = 0;
+
+#ifdef DO_IT_SMALL
+    Size = 1;
+    Target = NULL; // Uses the internal Buffer (PDU.DATA[])
+#else
+    Size = 1024;
+    Target = &Buffer; // Uses a larger buffer
+#endif
 
     // Connection
     while (!Client.Connected)
@@ -145,32 +162,22 @@ void loop()
             delay(500);
     }
 
+    // Get the current tick
     MarkTime();
-    Result = Client.GetPlcStatus(&Status);
-    if (Result == 0)
-    {
-        if (Status != LastStatus)
-        {
-            LastStatus = Status;
-            Serial.print("CPU Status change detected, now is ");
-            switch (Status)
-            {
-            case S7CpuStatusUnknown:
-                Serial.println("UNKNOWN");
-                break;
-            case S7CpuStatusRun:
-                Serial.println("RUNNING");
-                break;
-            case S7CpuStatusStop:
-                Serial.println("STOPPED");
-                break;
-            }
-        }
-    }
-    else
-        CheckError(Result);
 
-    delay(500);
+    // Write commands from WIFI JOYSTICK to "DB1 - Byte 0" of PLC
+// And PLC will carry out the commands as follows
+// UP      -    DB1.DBX0.0  - CONTROL RELAY 0 AT PLC OUTPUT Q124.0
+// DOWN    -    DB1.DBX0.1  - CONTROL RELAY 1 AT PLC OUTPUT Q124.1
+// RIGHT   -    DB1.DBX0.2  - CONTROL RELAY 2 AT PLC OUTPUT Q124.2
+// LEFT    -    DB1.DBX0.3  - CONTROL RELAY 3 AT PLC OUTPUT Q124.3
+
+    Client.WriteArea(S7AreaDB, // We are requesting DB access
+                     DBnum,    // DB Number
+                     0,        // Start from byte N.0
+                     Size,     // We need "Size" bytes
+                     &WritetoPLC);  // Put them into our target (Buffer or PDU)
+    
 }
-
+//------------------------------------------------------------
 
