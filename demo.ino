@@ -165,13 +165,6 @@ void loop()
     // Get the current tick
     MarkTime();
 
-    // Write commands from WIFI JOYSTICK to "DB1 - Byte 0" of PLC
-// And PLC will carry out the commands as follows
-// UP      -    DB1.DBX0.0  - CONTROL RELAY 0 AT PLC OUTPUT Q124.0
-// DOWN    -    DB1.DBX0.1  - CONTROL RELAY 1 AT PLC OUTPUT Q124.1
-// RIGHT   -    DB1.DBX0.2  - CONTROL RELAY 2 AT PLC OUTPUT Q124.2
-// LEFT    -    DB1.DBX0.3  - CONTROL RELAY 3 AT PLC OUTPUT Q124.3
-
     Client.WriteArea(S7AreaDB, // We are requesting DB access
                      DBnum,    // DB Number
                      0,        // Start from byte N.0
