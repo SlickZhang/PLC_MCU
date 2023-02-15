@@ -3,7 +3,7 @@
 #include "Platform.h"
 #include "Settimino.h"
 
-#define DO_IT_SMALL
+#define SMALL_MODE
 //----------------------------------------------------------
 
 
@@ -147,7 +147,7 @@ void loop()
 
     WritetoPLC[0] = 0;
 
-#ifdef DO_IT_SMALL
+#ifdef SMALL_MODE
     Size = 1;
     Target = NULL; // Uses the internal Buffer (PDU.DATA[])
 #else
